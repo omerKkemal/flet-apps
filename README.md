@@ -27,7 +27,7 @@ flet-apps/
 Clone the repository:
 
 ```bash
-git clone [https://github.com/<your-username>/flet-apps.git](https://github.com/omerKkemal/flet-apps.git)
+git clone https://github.com/omerKkemal/flet-apps.git
 cd flet-apps
 ```
 
