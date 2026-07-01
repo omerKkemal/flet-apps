@@ -1,9 +1,5 @@
 # PhontomGate – the GUI that will consume your soul
 
-<p align="center">
-  <img src="https://img.shields.io/badge/PHONTOMGATE-FLET%20GUI-10b981?style=for-the-badge&logo=python&logoColor=white&labelColor=1a1a2e" alt="PhontomGate">
-</p>
-
 Because apparently not everyone wants to live in a terminal.  
 This is the **Flet GUI version** of PhantomGate – for people who like buttons, colors, and clicking things.  
 And yes, it's a Trojan horse. But a *friendly* one. Mostly.
