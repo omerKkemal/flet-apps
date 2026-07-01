@@ -2,7 +2,7 @@
 
 A collection of cross-platform applications built with **Flet** and Python.
 
-This repository serves as a central workspace for my Flet projects, ranging from utilities and experiments to complete desktop and mobile applications.
+This repository serves as a central workspace for my Flet projects, including language tools, mobile applications, reusable components, and experimental cross-platform software.
 
 ## Repository Structure
 
@@ -11,16 +11,25 @@ flet-apps/
 ├── orm_lite.py
 ├── en-to-am/
 ├── app/
+├── PhantomGate/
+├── mobile-am-to-en/
 └── README.md
 ```
 
-### Directories
+## Projects
 
-| Folder | Description |
-|---------|-------------|
-| `orm_lite.py` | Shared ORM/database utilities used across applications. |
-| `en-to-am/` | English to Amharic translation application. |
-| `app/` | General Flet application. |
+| Project           | Description                                                                   | Status             |
+| ----------------- | ----------------------------------------------------------------------------- | ------------------ |
+| `en-to-am`        | English → Amharic translation application.                                    | Active             |
+| `mobile-am-to-en` | Mobile application for Amharic to Latin transliteration.                      | Active             |
+| `app`             | General-purpose Flet application for experimentation and feature development. | In Development     |
+| `PhantomGate`     | Cross-platform Flet application under active development.                     | Active Development |
+
+## Shared Components
+
+| Component     | Description                                                         |
+| ------------- | ------------------------------------------------------------------- |
+| `orm_lite.py` | Lightweight ORM/database utilities shared across multiple projects. |
 
 ## Getting Started
 
@@ -31,7 +40,7 @@ git clone https://github.com/omerKkemal/flet-apps.git
 cd flet-apps
 ```
 
-Navigate to the application you want to run:
+Navigate to the project you want to run:
 
 ```bash
 cd en-to-am
@@ -40,10 +49,30 @@ cd en-to-am
 or
 
 ```bash
+cd mobile-am-to-en
+```
+
+or
+
+```bash
+cd PhantomGate
+```
+
+or
+
+```bash
 cd app
 ```
 
-Install the dependencies:
+Install dependencies for the selected project.
+
+If the project uses `pyproject.toml`:
+
+```bash
+pip install -e .
+```
+
+If the project uses `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
@@ -52,46 +81,26 @@ pip install -r requirements.txt
 Run the application:
 
 ```bash
-python main.py
-```
-
-or if the project uses the Flet CLI:
-
-```bash
 flet run
 ```
 
-## Applications
+or, where applicable:
 
-### en-to-am
-
-A simple and fast English → Amharic translation application built with Flet.
-
-**Status:** Active
-
----
-
-### app
-
-A Flet application for experimentation and feature development.
-
-**Status:** In Development
-
-## Shared Components
-
-The `orm/` directory contains reusable database models and utilities shared between applications.
+```bash
+python main.py
+```
 
 ## Technologies
 
-- Python
-- Flet
-- SQLite
-- SQLAlchemy (where applicable)
+* Python
+* Flet
+* SQLite
+* SQLAlchemy (where applicable)
 
 ## Requirements
 
-- Python 3.11+
-- Flet
+* Python 3.11+
+* Flet
 
 ## License
 
