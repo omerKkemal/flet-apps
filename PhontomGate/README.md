@@ -23,7 +23,7 @@ For more details on running the app, refer to the [Getting Started Guide](https:
 ### Android
 
 ```bash
-flet build apk -v
+flet build apk -v --cleanup-app --clear-cache
 ```
 
 For more details on building and signing `.apk` or `.aab`, refer to the [Android Packaging Guide](https://flet.dev/docs/publish/android/).
@@ -31,7 +31,7 @@ For more details on building and signing `.apk` or `.aab`, refer to the [Android
 ### iOS
 
 ```bash
-flet build ipa -v
+flet build ipa -v --cleanup-app --clear-cache
 ```
 
 For more details on building and signing `.ipa`, refer to the [iOS Packaging Guide](https://flet.dev/docs/publish/ios/).
@@ -39,7 +39,7 @@ For more details on building and signing `.ipa`, refer to the [iOS Packaging Gui
 ### macOS
 
 ```bash
-flet build macos -v
+flet build macos -v --cleanup-app --clear-cache
 ```
 
 For more details on building macOS package, refer to the [macOS Packaging Guide](https://flet.dev/docs/publish/macos/).
@@ -47,7 +47,7 @@ For more details on building macOS package, refer to the [macOS Packaging Guide]
 ### Linux
 
 ```bash
-flet build linux -v
+flet build linux -v --cleanup-app --clear-cache
 ```
 
 For more details on building Linux package, refer to the [Linux Packaging Guide](https://flet.dev/docs/publish/linux/).
@@ -55,7 +55,7 @@ For more details on building Linux package, refer to the [Linux Packaging Guide]
 ### Windows
 
 ```bash
-flet build windows -v
+flet build windows -v --cleanup-app --clear-cache
 ```
 
 For more details on building Windows package, refer to the [Windows Packaging Guide](https://flet.dev/docs/publish/windows/).
