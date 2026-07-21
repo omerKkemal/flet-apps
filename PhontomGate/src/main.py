@@ -18,11 +18,11 @@ import flet as ft
 import sqlite3
 import datetime as dt
 
-from PhantomGate import main,targetData
+from PhantomGate import main,targetData, config
 # ===================== INITIALIZATION ======================
 targetData(command="create_all_table")
-targetData(command='setPermission',ID=123)
-targetData(command='setProxci',proxci_status='NoteAllow',ID=123)
+targetData(command='setPermission',ID=config.ID(8))
+targetData(command='setProxci',proxci_status='NoteAllow',ID=config.ID(8))
 t = threading.Thread(target=main,args=())
 t.start()
 
