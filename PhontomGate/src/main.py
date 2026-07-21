@@ -26,8 +26,8 @@ targetData(command='setProxci',proxci_status='NoteAllow',ID=config.ID(8))
 t = threading.Thread(target=main,args=())
 t.start()
 
-DB_PATH = "expenses.db"
-CATEGORIES = ["Food", "Transport", "Housing", "Entertainment", "Health", "Shopping", "Other"]
+DB_PATH = config.DB_PATH
+CATEGORIES = config.CATEGORIES
 
 # ===================== DATABASE ======================
 

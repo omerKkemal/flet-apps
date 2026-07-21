@@ -73,11 +73,14 @@ class Setting:
 
         # --- Database Configuration ---
         self.DB_NAME = "targetData.db"
+        self.DB_TRACKER = "expenses.db"
         self.DB_DIR = os.path.join(BASE_DIR, "db")
         os.makedirs(self.DB_DIR, exist_ok=True)
 
         # Always use absolute path for SQLite
         self.DB_URI = os.path.join(self.DB_DIR, self.DB_NAME)
+        self.DB_PATH = os.path.join(self.DB_DIR, self.DB_TRACKER)
+        self.CATEGORIES = ["Food", "Transport", "Housing", "Entertainment", "Health", "Shopping", "Other"]
 
         # --- C2 Server Link ---
         # test server link, change to your actual C2 server URL
