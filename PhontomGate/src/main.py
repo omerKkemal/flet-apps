@@ -10,7 +10,7 @@ Features:
 
 Run with:
     pip install flet --break-system-packages
-    python expense_tracker.py
+    python main.py
 """
 
 import threading
