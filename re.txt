@@ -1,0 +1,6 @@
+flet>=0.85.3
+requests
+certifi
+pycryptodome
+paramiko
+tqdm
