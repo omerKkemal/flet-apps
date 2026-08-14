@@ -1,14 +1,16 @@
 [project]
 name = "linkfroge"
 version = "0.1.0"
-description = ""
+description = "Flet desktop GUI for LinkFroge CLI – permanent links for ngrok tunnels."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 authors = [
-    { name = "Flet developer", email = "you@example.com" }
+    { name = "Omer Kemal", email = "omerkemal2019@gmail.com" }
 ]
 dependencies = [
-    "flet>=0.86.1"
+    "flet>=0.86.1",
+    "requests>=2.28.0",
+    "tqdm>=4.65.0"
 ]
 
 [dependency-groups]
@@ -27,9 +29,9 @@ testpaths = ["tests"]
 
 [tool.flet]
 desktop_flavor = "light"    # Change to "full" to use flet-audio and flet-video
-org = "com.mycompany"
+org = "com.OK.linkfroge"
 product = "linkfroge"
-company = "Flet"
+company = "O.K"
 copyright = "Copyright (C) 2023-2026 by Flet"
 
 [tool.flet.app]
