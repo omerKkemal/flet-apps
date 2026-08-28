@@ -1,0 +1,10 @@
+what it recive :
+{
+    "ders_name": {
+         "ders_time": "2:00 pm",
+         "day_of_week": "from-to",
+         "ders_book(pdf)": "link", 
+         "ders_teacher_name": "teacher_name"
+    }
+....
+}

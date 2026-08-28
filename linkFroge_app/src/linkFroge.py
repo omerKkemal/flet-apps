@@ -24,17 +24,39 @@ ngpath = Path.home() / ".linkfroge"
 ngrok_executable = "ngrok.exe" if platform.system() == "Windows" else "ngrok"
 
 
+def is_android():
+    """Detect if we are running on Android (Termux or similar)."""
+    return 'ANDROID_ROOT' in os.environ or 'TERMUX_VERSION' in os.environ
+
+
 def get_platform():
-    """Determine the platform for downloading ngrok."""
+    """Determine the platform string for downloading ngrok."""
     plat = platform.system()
     if plat == "Windows":
         return "windows-amd64"
     elif plat == "Linux":
-        return "linux-amd64"
+        if is_android():
+            # Determine architecture for Android
+            machine = platform.machine().lower()
+            if machine in ('aarch64', 'arm64', 'armv8l'):
+                return "linux-arm64"
+            elif machine in ('armv7l', 'armv6l'):
+                return "linux-arm"
+            else:
+                # fallback to arm64
+                return "linux-arm64"
+        else:
+            return "linux-amd64"
     elif plat == "Darwin":
-        return "darwin-amd64"
+        # macOS: support both Intel and Apple Silicon
+        machine = platform.machine().lower()
+        if machine in ('arm64', 'aarch64'):
+            return "darwin-arm64"
+        else:
+            return "darwin-amd64"
     else:
         raise Exception("Unsupported platform")
+
 
 plat = get_platform()
 
@@ -135,7 +157,7 @@ def DownloadNgrok(url, path):
         with zipfile.ZipFile(downloaded) as zip_ref:
             zip_ref.extractall(path)
 
-        # Make executable on Linux/macOS
+        # Make executable on Linux/macOS/Android
         ngrok_path = Path(path) / ngrok_executable
         if ngrok_path.exists():
             try:
