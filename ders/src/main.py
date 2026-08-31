@@ -1,28 +1,32 @@
-import tempfile
+import base64
+import json
+from pathlib import Path
+from urllib.parse import urljoin
 import flet as ft
 import requests
 from utility.api import API
 from utility.setting import Setting
 
-# Initialize configuration
+try:
+    import fitz
+except ImportError:
+    fitz = None
+
 config = Setting()
 config.setting_var()
 
-# Initialize API instance
-api = API(
-    base_url=(
-        config.BASE_URL
-        if hasattr(config, "BASE_URL")
-        else "http://127.0.0.1:8000"
-    )
-)
+API_BASE_URL = getattr(config, "BASE_URL", "http://127.0.0.1:8000")
+api = API(base_url=API_BASE_URL)
+PDF_BASE_URL = "https://digtvbg.com/files/"
 
-# Offline Fallback Mock Data
+# Local JSON storage path for bookmarks
+BOOKMARKS_FILE = Path("bookmarks.json")
+
 MOCK_COURSES = {
     "Matematik (Demo)": {
         "ders_time": "2:00 pm",
         "day_of_week": "Mon-Wed",
-        "ders_book(pdf)": "pdf/math_sample.pdf",
+        "ders_book(pdf)": "books-for-hacking/Hacking%20-%20The%20Art%20of%20Exploitation%2C%202nd%20Edition%20by%20Jon%20Erickson.pdf",
         "ders_teacher_name": "Ahmet Yılmaz",
     },
     "Fizik (Demo)": {
@@ -41,216 +45,446 @@ MOCK_COURSES = {
 
 
 def main(page: ft.Page) -> None:
-    page.title = "DERS"
+    page.title = "DERS Mobile PDF Reader"
     page.padding = 0
 
-    main_lessons_list = ft.ListView(expand=True, spacing=10, padding=10)
+    page.window.width = 412
+    page.window.height = 892
+    page.window.resizable = True
 
-    # 1. Header list for TabBar
-    tab_headers = [
-        ft.Tab(label="Main"),
-        ft.Tab(label="Bookmarks"),
-    ]
+    # In-memory Bookmark Store
+    bookmarked_courses = {}
 
-    # 2. Body view list for TabBarView
-    tab_views = [
-        ft.Column(controls=[main_lessons_list], expand=True),
-        ft.Column(controls=[ft.Text("Bookmarks Content Area")], expand=True),
-    ]
+    def load_bookmarks_from_disk():
+        """Loads bookmarked courses from the local JSON file if it exists."""
+        nonlocal bookmarked_courses
+        if BOOKMARKS_FILE.exists():
+            try:
+                with open(BOOKMARKS_FILE, "r", encoding="utf-8") as f:
+                    bookmarked_courses = json.load(f)
+            except Exception as e:
+                print(f"[Bookmark Load Error] {e}")
+                bookmarked_courses = {}
+        else:
+            bookmarked_courses = {}
 
-    tab_bar = ft.TabBar(tabs=tab_headers)
-    tab_bar_view = ft.TabBarView(controls=tab_views, expand=True)
+    def save_bookmarks_to_disk():
+        """Saves current bookmarked courses to the local JSON file."""
+        try:
+            with open(BOOKMARKS_FILE, "w", encoding="utf-8") as f:
+                json.dump(bookmarked_courses, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"[Bookmark Save Error] {e}")
 
-    tabs_container = ft.Tabs(
-        length=len(tab_headers),
-        selected_index=0,
-        expand=True,
-        content=ft.Column(
-            expand=True,
-            controls=[
-                tab_bar,
-                tab_bar_view,
-            ],
-        ),
-    )
+    # Initial load of bookmarks on startup
+    load_bookmarks_from_disk()
 
-    def close_pdf_tab(header_tab: ft.Tab, view_column: ft.Column):
-        """Closes an open PDF tab and safely adjusts the active tab index."""
-        if header_tab in tab_headers:
-            index_to_remove = tab_headers.index(header_tab)
-            tab_headers.remove(header_tab)
-            tab_views.remove(view_column)
+    def render_pdf_in_app(pdf_bytes: bytes) -> ft.ListView:
+        if not fitz:
+            raise RuntimeError("PyMuPDF (fitz) is not installed.")
 
-            tabs_container.length = len(tab_headers)
-            tabs_container.selected_index = max(0, index_to_remove - 1)
-            page.update()
+        pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        pdf_pages_list = ft.ListView(expand=True, spacing=10, padding=8)
 
-    def show_offline_state(container: ft.Control, retry_callback, use_demo_callback=None):
-        """Displays offline banner with Retry and optional 'Use Offline Data' buttons."""
-        action_buttons = [
-            ft.FilledButton(
-                content=ft.Text("Retry Connection"),
-                icon=ft.Icons.REFRESH,
-                on_click=lambda e: retry_callback(),
+        for page_index in range(len(pdf_doc)):
+            pdf_page = pdf_doc.load_page(page_index)
+            pixmap = pdf_page.get_pixmap(dpi=130)
+            img_b64 = base64.b64encode(pixmap.tobytes("png")).decode("utf-8")
+
+            page_card = ft.Card(
+                elevation=2,
+                content=ft.Container(
+                    padding=6,
+                    content=ft.Column(
+                        controls=[
+                            ft.Text(
+                                f"Page {page_index + 1} of {len(pdf_doc)}",
+                                size=11,
+                                color="grey600",
+                            ),
+                            ft.Image(
+                                src=f"data:image/png;base64,{img_b64}",
+                                fit="contain",
+                                expand=True,
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ),
             )
-        ]
+            pdf_pages_list.controls.append(page_card)
 
-        if use_demo_callback:
-            action_buttons.append(
-                ft.OutlinedButton(
-                    content=ft.Text("Load Demo Data"),
-                    icon=ft.Icons.OFFLINE_PIN,
-                    on_click=lambda e: use_demo_callback(),
-                )
-            )
+        pdf_doc.close()
+        return pdf_pages_list
 
-        offline_ui = ft.Container(
-            content=ft.Column(
-                controls=[
-                    ft.Icon(
-                        ft.Icons.WIFI_OFF_ROUNDED,
-                        size=64,
-                        color="grey400",
-                    ),
-                    ft.Text("You are offline", size=22, weight=ft.FontWeight.BOLD),
-                    ft.Text(
-                        "Cannot connect to server. Would you like to retry or view offline data?",
-                        color="grey600",
-                        text_align=ft.TextAlign.CENTER,
-                    ),
-                    ft.Row(
-                        controls=action_buttons,
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        spacing=10,
-                    ),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                alignment=ft.MainAxisAlignment.CENTER,
-                spacing=12,
+    def open_pdf_view(pdf_endpoint: str, ders_title: str):
+        clean_endpoint = pdf_endpoint.strip() if pdf_endpoint else ""
+        if not clean_endpoint:
+            return
+
+        # UI Progress & Animation Controls
+        progress_bar = ft.ProgressBar(width=260, value=0.0, color="indigo400", bgcolor="grey200")
+        percentage_text = ft.Text("0%", size=13, weight=ft.FontWeight.BOLD, color="indigo700")
+        status_text = ft.Text("Connecting to server...", size=14, color="grey700", weight=ft.FontWeight.W_500)
+        
+        # Animated loading visual layout
+        loading_card = ft.Card(
+            elevation=4,
+            content=ft.Container(
+                padding=24,
+                width=320,
+                content=ft.Column(
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.PICTURE_AS_PDF_ROUNDED, size=52, color="indigo500"),
+                        ft.Container(height=8),
+                        ft.ProgressRing(width=36, height=36, stroke_width=3, color="indigo400"),
+                        ft.Container(height=12),
+                        status_text,
+                        ft.Container(height=8),
+                        progress_bar,
+                        percentage_text,
+                    ],
+                    spacing=6,
+                ),
             ),
-            alignment=ft.Alignment(0, 0),
-            expand=True,
         )
 
-        if isinstance(container, (ft.ListView, ft.Column)):
-            container.controls = [offline_ui]
-
-        page.update()
-
-    def open_pdf_in_new_tab(pdf_endpoint: str, ders_title: str):
-        """Creates a dynamic tab, switches to it, and loads the course PDF."""
-        new_header_tab = ft.Tab(label=f"📖 {ders_title}")
-
-        pdf_body_container = ft.Column(
+        body_container = ft.Column(
             expand=True,
             controls=[
                 ft.Container(
-                    content=ft.ProgressRing(),
+                    content=loading_card,
                     alignment=ft.Alignment(0, 0),
                     expand=True,
                 )
             ],
         )
 
-        # Fixed: bgcolor instead of color
-        top_header_bar = ft.Container(
-            padding=ft.Padding(left=15, top=5, right=15, bottom=5),
-            bgcolor="surfaceVariant",
-            content=ft.Row(
-                controls=[
-                    ft.Text(f"Book: {ders_title}", weight=ft.FontWeight.BOLD, size=16),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        icon_size=20,
-                        tooltip="Close PDF Tab",
-                        on_click=lambda e: close_pdf_tab(new_header_tab, pdf_view_column),
-                    ),
-                ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-        )
+        def go_back(e):
+            if len(page.views) > 1:
+                page.views.pop()
+                page.update()
 
-        pdf_view_column = ft.Column(
-            expand=True,
-            spacing=0,
+        pdf_screen = ft.View(
+            route="/pdf",
+            padding=0,
             controls=[
-                top_header_bar,
-                pdf_body_container,
+                ft.AppBar(
+                    title=ft.Text(ders_title, size=18, weight=ft.FontWeight.BOLD),
+                    center_title=True,
+                    bgcolor="surfaceVariant",
+                    leading=ft.IconButton(
+                        icon=ft.Icons.ARROW_BACK,
+                        on_click=go_back,
+                    ),
+                ),
+                body_container,
             ],
         )
 
-        # Register header and body view in their respective lists
-        tab_headers.append(new_header_tab)
-        tab_views.append(pdf_view_column)
-
-        # Sync container length and switch to newly added tab
-        tabs_container.length = len(tab_headers)
-        tabs_container.selected_index = len(tab_headers) - 1
+        page.views.append(pdf_screen)
         page.update()
 
         try:
-            pdf_bytes = api.get_bytes(pdf_endpoint)
+            if clean_endpoint.startswith(("http://", "https://")):
+                full_download_url = clean_endpoint
+            else:
+                base_pdf = PDF_BASE_URL if PDF_BASE_URL.endswith("/") else PDF_BASE_URL + "/"
+                full_download_url = urljoin(base_pdf, clean_endpoint.lstrip("/"))
 
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            temp_file.write(pdf_bytes)
-            temp_file.close()
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Mobile Safari/537.36",
+                "Accept": "*/*",
+            }
 
-            pdf_body_container.controls.clear()
-            pdf_body_container.controls.append(
-                ft.WebView(
-                    url=f"file://{temp_file.name}",
+            # Stream response to measure progress
+            resp = requests.get(full_download_url, headers=headers, stream=True, timeout=90)
+            resp.raise_for_status()
+
+            total_length = resp.headers.get("content-length")
+            pdf_bytes = bytearray()
+
+            status_text.value = "Downloading PDF..."
+            page.update()
+
+            if total_length is None:
+                # Content-length header missing: show indeterminate progress
+                progress_bar.value = None
+                percentage_text.value = "Downloading..."
+                page.update()
+                pdf_bytes = resp.content
+            else:
+                total_size = int(total_length)
+                downloaded = 0
+                chunk_size = 8192
+
+                for chunk in resp.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        pdf_bytes.extend(chunk)
+                        downloaded += len(chunk)
+                        progress = min(downloaded / total_size, 1.0)
+                        progress_bar.value = progress
+                        percentage_text.value = f"{int(progress * 100)}%"
+                        page.update()
+
+            # Page rendering stage
+            status_text.value = "Rendering PDF pages..."
+            progress_bar.value = None  # Pulse indicator during rendering
+            percentage_text.value = "Almost ready..."
+            page.update()
+
+            viewer = render_pdf_in_app(bytes(pdf_bytes))
+            body_container.controls.clear()
+            body_container.controls.append(viewer)
+
+        except Exception as err:
+            body_container.controls.clear()
+            body_container.controls.append(
+                ft.Container(
+                    padding=20,
+                    alignment=ft.Alignment(0, 0),
                     expand=True,
-                )
-            )
-        except Exception:
-            show_offline_state(
-                pdf_body_container,
-                retry_callback=lambda: open_pdf_in_new_tab(pdf_endpoint, ders_title),
-            )
-
-        page.update()
-
-    def populate_courses(data: dict):
-        """Parses course JSON data and builds main cards."""
-        main_lessons_list.controls.clear()
-
-        for ders_name, ders_info in data.items():
-            time_val = ders_info.get("ders_time", "N/A")
-            day_val = ders_info.get("day_of_week", "N/A")
-            pdf_endpoint = ders_info.get("ders_book(pdf)", "")
-            teacher_val = ders_info.get("ders_teacher_name", "Unknown")
-
-            card = ft.Card(
-                content=ft.Container(
-                    padding=15,
                     content=ft.Column(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
-                            ft.Text(ders_name, size=18, weight=ft.FontWeight.BOLD),
-                            ft.Text(f"👨‍🏫 Teacher: {teacher_val}", size=14),
-                            ft.Text(f"⏰ Time: {time_val} ({day_val})", size=14),
-                            ft.FilledButton(
-                                content=ft.Text("View PDF (New Tab)"),
-                                icon=ft.Icons.PICTURE_IN_PICTURE_ALT,
-                                on_click=lambda e, url=pdf_endpoint, title=ders_name: open_pdf_in_new_tab(
-                                    url, title
-                                ),
+                            ft.Icon(ft.Icons.ERROR_OUTLINE_ROUNDED, size=56, color="red400"),
+                            ft.Text("Unable to open PDF", size=18, weight=ft.FontWeight.BOLD),
+                            ft.Text(
+                                str(err),
+                                size=12,
+                                color="grey600",
+                                text_align=ft.TextAlign.CENTER,
                             ),
-                        ]
+                            ft.FilledButton(
+                                content=ft.Text("Retry"),
+                                icon=ft.Icons.REFRESH,
+                                on_click=lambda e: open_pdf_view(clean_endpoint, ders_title),
+                            ),
+                        ],
+                        spacing=12,
                     ),
                 )
             )
-            main_lessons_list.controls.append(card)
 
         page.update()
 
+    courses_list = ft.ListView(expand=True, spacing=12, padding=12)
+    bookmarks_list = ft.ListView(expand=True, spacing=12, padding=12)
+
+    content_switcher = ft.Container(content=courses_list, expand=True)
+
+    def update_bookmarks_ui():
+        """Renders the list of bookmarked courses."""
+        bookmarks_list.controls.clear()
+        if not bookmarked_courses:
+            bookmarks_list.controls.append(
+                ft.Container(
+                    alignment=ft.Alignment(0, 0),
+                    padding=40,
+                    content=ft.Column(
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(ft.Icons.BOOKMARK_BORDER, size=56, color="grey400"),
+                            ft.Text("No Bookmarks Saved", color="grey600", size=16),
+                            ft.Text(
+                                "Tap the bookmark icon on any lesson card to save it here.",
+                                color="grey500",
+                                size=12,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                )
+            )
+        else:
+            for ders_name, ders_info in bookmarked_courses.items():
+                teacher = ders_info.get("ders_teacher_name", "Unknown")
+                pdf_endpoint = (
+                    ders_info.get("ders_book(pdf)")
+                    or ders_info.get("ders_book")
+                    or ders_info.get("pdf")
+                    or ""
+                )
+
+                card = ft.Card(
+                    elevation=2,
+                    content=ft.Container(
+                        padding=14,
+                        content=ft.Column(
+                            controls=[
+                                ft.Text(ders_name, size=17, weight=ft.FontWeight.BOLD),
+                                ft.Text(f"👨‍🏫 Teacher: {teacher}", size=13, color="grey800"),
+                                ft.Row(
+                                    controls=[
+                                        ft.FilledButton(
+                                            content=ft.Text("Read Book", size=14),
+                                            icon=ft.Icons.CHEVRON_RIGHT,
+                                            expand=True,
+                                            on_click=lambda e, url=pdf_endpoint, title=ders_name: open_pdf_view(
+                                                url, title
+                                            ),
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.DELETE_OUTLINE,
+                                            icon_color="red400",
+                                            tooltip="Remove Bookmark",
+                                            on_click=lambda e, name=ders_name: remove_bookmark(name),
+                                        ),
+                                    ],
+                                    spacing=8,
+                                ),
+                            ],
+                            spacing=6,
+                        ),
+                    ),
+                )
+                bookmarks_list.controls.append(card)
+
+    def remove_bookmark(ders_name: str):
+        if ders_name in bookmarked_courses:
+            del bookmarked_courses[ders_name]
+            save_bookmarks_to_disk()
+            update_bookmarks_ui()
+            if current_courses_data:
+                populate_courses(current_courses_data)
+            page.update()
+
+    def on_nav_change(e):
+        selected_idx = e.control.selected_index if hasattr(e.control, "selected_index") else int(e.data)
+        if selected_idx == 0:
+            content_switcher.content = courses_list
+        else:
+            update_bookmarks_ui()
+            content_switcher.content = bookmarks_list
+        page.update()
+
+    nav_bar = ft.NavigationBar(
+        selected_index=0,
+        on_change=on_nav_change,
+        destinations=[
+            ft.NavigationBarDestination(
+                icon=ft.Icons.MENU_BOOK_OUTLINED,
+                selected_icon=ft.Icons.MENU_BOOK,
+                label="Lessons",
+            ),
+            ft.NavigationBarDestination(
+                icon=ft.Icons.BOOKMARK_OUTLINE,
+                selected_icon=ft.Icons.BOOKMARK,
+                label="Bookmarks",
+            ),
+        ],
+    )
+
+    main_screen = ft.View(
+        route="/",
+        padding=0,
+        controls=[
+            ft.AppBar(
+                title=ft.Text("DERS Library", weight=ft.FontWeight.BOLD),
+                center_title=True,
+                bgcolor="surfaceVariant",
+            ),
+            content_switcher,
+            nav_bar,
+        ],
+    )
+
+    current_courses_data = {}
+
+    def populate_courses(data: dict):
+        nonlocal current_courses_data
+        current_courses_data = data
+        courses_list.controls.clear()
+
+        for ders_name, ders_info in data.items():
+            teacher = ders_info.get("ders_teacher_name", "Unknown")
+            time_val = ders_info.get("ders_time", "N/A")
+            day_val = ders_info.get("ders_day", ders_info.get("day_of_week", "N/A"))
+            pdf_endpoint = (
+                ders_info.get("ders_book(pdf)")
+                or ders_info.get("ders_book")
+                or ders_info.get("pdf")
+                or ""
+            )
+
+            is_bookmarked = ders_name in bookmarked_courses
+
+            def toggle_bookmark(e, name=ders_name, info=ders_info):
+                if name in bookmarked_courses:
+                    del bookmarked_courses[name]
+                    e.control.icon = ft.Icons.BOOKMARK_BORDER
+                    e.control.icon_color = None
+                    e.control.tooltip = "Add to Bookmark"
+                else:
+                    bookmarked_courses[name] = info
+                    e.control.icon = ft.Icons.BOOKMARK
+                    e.control.icon_color = "amber700"
+                    e.control.tooltip = "Remove Bookmark"
+                
+                save_bookmarks_to_disk()
+                page.update()
+
+            card = ft.Card(
+                elevation=2,
+                content=ft.Container(
+                    padding=14,
+                    content=ft.Column(
+                        controls=[
+                            ft.Text(ders_name, size=17, weight=ft.FontWeight.BOLD),
+                            ft.Row(
+                                controls=[
+                                    ft.Icon(ft.Icons.PERSON_OUTLINE, size=16, color="grey700"),
+                                    ft.Text(f"Teacher: {teacher}", size=13, color="grey800"),
+                                ],
+                                spacing=6,
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.Icon(ft.Icons.ACCESS_TIME, size=16, color="grey700"),
+                                    ft.Text(f"{time_val} ({day_val})", size=13, color="grey800"),
+                                ],
+                                spacing=6,
+                            ),
+                            ft.Container(height=4),
+                            ft.Row(
+                                controls=[
+                                    ft.FilledButton(
+                                        content=ft.Text("Read Book", size=14),
+                                        icon=ft.Icons.CHEVRON_RIGHT,
+                                        expand=True,
+                                        on_click=lambda e, url=pdf_endpoint, title=ders_name: open_pdf_view(
+                                            url, title
+                                        ),
+                                    ),
+                                    ft.IconButton(
+                                        icon=ft.Icons.BOOKMARK if is_bookmarked else ft.Icons.BOOKMARK_BORDER,
+                                        icon_color="amber700" if is_bookmarked else None,
+                                        tooltip="Remove Bookmark" if is_bookmarked else "Add to Bookmark",
+                                        on_click=toggle_bookmark,
+                                    ),
+                                ],
+                                spacing=8,
+                            ),
+                        ],
+                        spacing=6,
+                    ),
+                ),
+            )
+            courses_list.controls.append(card)
+        page.update()
+
     def fetch_data():
-        """Fetches initial course list from API with working retry and offline fallback."""
-        main_lessons_list.controls.clear()
-        main_lessons_list.controls.append(
+        courses_list.controls.clear()
+        courses_list.controls.append(
             ft.Container(
-                content=ft.ProgressRing(),
                 alignment=ft.Alignment(0, 0),
                 expand=True,
+                content=ft.ProgressRing(),
             )
         )
         page.update()
@@ -258,14 +492,19 @@ def main(page: ft.Page) -> None:
         try:
             data = api.get("courses")
             populate_courses(data)
-        except Exception:
-            show_offline_state(
-                main_lessons_list,
-                retry_callback=fetch_data,
-                use_demo_callback=lambda: populate_courses(MOCK_COURSES),
-            )
+        except Exception as err:
+            print(f"[API Offline] {err}. Auto-switching to Mock Data...")
+            populate_courses(MOCK_COURSES)
 
-    page.add(tabs_container)
+    def handle_view_pop(e):
+        page.views.pop()
+        page.update()
+
+    page.on_view_pop = handle_view_pop
+    page.views.clear()
+    page.views.append(main_screen)
+    page.update()
+
     fetch_data()
 
 

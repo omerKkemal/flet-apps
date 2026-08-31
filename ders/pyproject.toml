@@ -8,7 +8,9 @@ authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
-    "flet>=0.86.5"
+    "flet>=0.86.5",
+    "requests>=2.31.0",
+    "pymupdf>=1.23.0"
 ]
 
 [dependency-groups]

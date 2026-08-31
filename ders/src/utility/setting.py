@@ -15,7 +15,7 @@ class Setting:
     """
 
     def setting_var(self):
-
+        # App configrations
         # for local test
         self.IP = "http://127.0.0.1"
         self.PORT = 8000
