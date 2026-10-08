@@ -7,9 +7,15 @@ Data is saved in data.json next to this file.
 import json
 import os
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import flet as ft
+import flet_charts as fc
+
+try:  # only installed/working in the Android build
+    from flet_android_notifications import FletAndroidNotifications
+except ImportError:
+    FletAndroidNotifications = None
 
 # On Android/iOS the app folder is read-only, so Flet provides a persistent,
 # writable folder through FLET_APP_STORAGE_DATA. On desktop we fall back to
@@ -64,8 +70,57 @@ def main(page: ft.Page):
 
     body = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=10)
 
-    def commit():
+    # ---------- notifications ----------
+    notifier = FletAndroidNotifications() if FletAndroidNotifications else None
+    state["mode"] = "inexact_allow_while_idle"
+
+    async def reschedule():
+        """Cancel everything and schedule the next 7 days of blueprint alarms.
+        Alarms are handled by Android's AlarmManager, so they fire even if the
+        app is closed. Reopening the app refreshes the next 7 days."""
+        if not notifier:
+            return
+        try:
+            await notifier.cancel_all()
+            now = datetime.now()
+            n = 1
+            for offset in range(7):
+                base = (now + timedelta(days=offset)).date()
+                for s in data["schedule"]:
+                    try:
+                        h, m = map(int, s["time"].split(":"))
+                        when = datetime(base.year, base.month, base.day, h, m)
+                    except ValueError:
+                        continue
+                    if when <= now:
+                        continue
+                    await notifier.schedule_notification(
+                        notification_id=n,
+                        title="Time for your next task",
+                        body=f'{s["time"]} - {s["title"]}',
+                        scheduled_time=when,
+                        payload=s["id"],
+                        schedule_mode=state["mode"],
+                    )
+                    n += 1
+        except Exception as ex:
+            print("Notification scheduling failed:", ex)
+
+    async def setup_notifications():
+        if not notifier:
+            return
+        try:
+            await notifier.request_permissions()
+            if await notifier.request_exact_alarm_permission():
+                state["mode"] = "exact_allow_while_idle"
+        except Exception as ex:
+            print("Notification permission error:", ex)
+        await reschedule()
+
+    def commit(resched=False):
         save(data)
+        if resched:
+            page.run_task(reschedule)
         render()
 
     # ---------- TODAY ----------
@@ -132,7 +187,7 @@ def main(page: ft.Page):
                                 ft.Text(f"Controlled: {c}   |   Took control: {s}   |   {score}"),
                                 ft.Row(
                                     [
-                                        ft.ElevatedButton(
+                                        ft.Button(
                                             "I controlled myself +1",
                                             icon=ft.Icons.CHECK_CIRCLE,
                                             on_click=lambda e, i=b["id"]: bump("control", i),
@@ -147,7 +202,7 @@ def main(page: ft.Page):
                                 ),
                                 ft.Row(
                                     [
-                                        ft.ElevatedButton(
+                                        ft.Button(
                                             "Behavior took control +1",
                                             icon=ft.Icons.WARNING,
                                             on_click=lambda e, i=b["id"]: bump("slip", i),
@@ -167,42 +222,268 @@ def main(page: ft.Page):
             )
         return rows
 
-    # ---------- HISTORY ----------
-    def history_view():
-        rows = [ft.Text("Last 14 days", size=22, weight=ft.FontWeight.BOLD)]
-        total = len(data["schedule"])
+    # ---------- HISTORY (dashboard) ----------
+    def day_stats(k):
+        d = data["days"].get(k)
         valid = {s["id"] for s in data["schedule"]}
-        for i in range(14):
+        done = {x for x in d["done"] if x in valid} if d else set()
+        pct = len(done) / len(valid) if valid else 0
+        return {
+            "pct": pct,
+            "done": done,
+            "c": sum(d["control"].values()) if d else 0,
+            "s": sum(d["slip"].values()) if d else 0,
+            "cd": d["control"] if d else {},
+            "sd": d["slip"] if d else {},
+        }
+
+    def streak():
+        """Consecutive days with >=80% of the routine done (today doesn't break it)."""
+        n = 0
+        for i in range(400):
             k = (date.today() - timedelta(days=i)).isoformat()
-            d = data["days"].get(k)
-            done = len([x for x in d["done"] if x in valid]) if d else 0
-            pct = done / total if total else 0
-            c = sum(d["control"].values()) if d else 0
-            s = sum(d["slip"].values()) if d else 0
-            ctrl = f"{int(c / (c + s) * 100)}%" if c + s else "-"
-            rows.append(
-                ft.Column(
-                    [
-                        ft.Text(f"{k}   routine {int(pct * 100)}%   control {ctrl}  ({c} won / {s} lost)"),
-                        ft.ProgressBar(value=pct),
-                    ],
-                    spacing=4,
+            if day_stats(k)["pct"] >= 0.8:
+                n += 1
+            elif i > 0:
+                break
+        return n
+
+    def set_range(n):
+        state["range"] = n
+        render()
+
+    def stat_card(title, value, sub, color):
+        return ft.Container(
+            expand=True, padding=12, border_radius=12, bgcolor=color,
+            content=ft.Column(
+                [
+                    ft.Text(title, size=12),
+                    ft.Text(value, size=26, weight=ft.FontWeight.BOLD),
+                    ft.Text(sub, size=11),
+                ],
+                spacing=2,
+            ),
+        )
+
+    def panel(title, *controls):
+        return ft.Container(
+            padding=12, border_radius=12, bgcolor=ft.Colors.GREY_100,
+            content=ft.Column(
+                [ft.Text(title, size=16, weight=ft.FontWeight.BOLD), *controls], spacing=8
+            ),
+        )
+
+    def x_labels(labels, step):
+        return [
+            fc.ChartAxisLabel(value=i, label=ft.Text(l, size=9))
+            for i, l in enumerate(labels)
+            if i % step == 0
+        ]
+
+    def history_view():
+        n = state.get("range", 7)
+        T = len(data["schedule"])  # tasks per day in the blueprint
+        keys = [(date.today() - timedelta(days=i)).isoformat() for i in range(n - 1, -1, -1)]
+        st = [day_stats(k) for k in keys]
+        labels = [
+            date.fromisoformat(k).strftime("%a")[:2] if n <= 7 else str(date.fromisoformat(k).day)
+            for k in keys
+        ]
+        step = 1 if n <= 7 else 5
+        D = sum(len(x["done"]) for x in st)
+        avg = sum(x["pct"] for x in st) / n
+        C = sum(x["c"] for x in st)
+        S = sum(x["s"] for x in st)
+        ctrl = f"{int(C / (C + S) * 100)}%" if C + S else "-"
+        bar_w = 14 if n <= 7 else 5
+
+        range_btns = ft.Row(
+            [
+                (ft.Button if n == r else ft.TextButton)(
+                    f"{r} days", on_click=lambda e, r=r: set_range(r)
                 )
+                for r in (7, 30)
+            ]
+        )
+
+        rows = [
+            ft.Text("Dashboard", size=22, weight=ft.FontWeight.BOLD),
+            range_btns,
+            ft.Row(
+                [
+                    stat_card("Tasks done", f"{D}/{T * n}", f"last {n} days", ft.Colors.BLUE_100),
+                    stat_card("Avg completion", f"{int(avg * 100)}%", f"today {len(st[-1]['done'])}/{T}", ft.Colors.GREEN_100),
+                ]
+            ),
+            ft.Row(
+                [
+                    stat_card("Self-control", ctrl, f"{C} won / {S} lost", ft.Colors.ORANGE_100),
+                    stat_card("Streak", f"{streak()}", "days at 80%+", ft.Colors.PURPLE_100),
+                ]
+            ),
+        ]
+
+        # 1) tasks done per day (bar chart, tap a bar for "done/total")
+        rows.append(
+            panel(
+                "Tasks done per day",
+                fc.BarChart(
+                    height=170,
+                    max_y=max(T, 1),
+                    groups=[
+                        fc.BarChartGroup(
+                            x=i,
+                            rods=[
+                                fc.BarChartRod(
+                                    from_y=0,
+                                    to_y=len(x["done"]),
+                                    width=bar_w,
+                                    color=ft.Colors.BLUE_400,
+                                    tooltip=f"{labels[i]}: {len(x['done'])}/{T}",
+                                )
+                            ],
+                        )
+                        for i, x in enumerate(st)
+                    ],
+                    bottom_axis=fc.ChartAxis(labels=x_labels(labels, step)),
+                ),
             )
+        )
+
+        # 2) trend line: routine % and self-control %
+        series = [
+            fc.LineChartData(
+                points=[fc.LineChartDataPoint(i, x["pct"] * 100) for i, x in enumerate(st)],
+                color=ft.Colors.BLUE_400, stroke_width=3, curved=True,
+            )
+        ]
+        ctrl_pts = [
+            fc.LineChartDataPoint(i, x["c"] / (x["c"] + x["s"]) * 100)
+            for i, x in enumerate(st) if x["c"] + x["s"]
+        ]
+        if ctrl_pts:
+            series.append(
+                fc.LineChartData(points=ctrl_pts, color=ft.Colors.GREEN_400, stroke_width=3, curved=True)
+            )
+        rows.append(
+            panel(
+                "Trend (%)",
+                fc.LineChart(
+                    height=170, min_y=0, max_y=100, min_x=0, max_x=max(n - 1, 1),
+                    data_series=series,
+                    bottom_axis=fc.ChartAxis(labels=x_labels(labels, step)),
+                ),
+                ft.Text("Blue = routine completion   Green = self-control", size=11),
+            )
+        )
+
+        # 3) self-control per day (stacked bars)
+        mx = max([x["c"] + x["s"] for x in st] + [1])
+        rows.append(
+            panel(
+                "Self-control per day",
+                fc.BarChart(
+                    height=170,
+                    max_y=mx + 1,
+                    groups=[
+                        fc.BarChartGroup(
+                            x=i,
+                            rods=[
+                                fc.BarChartRod(
+                                    from_y=0,
+                                    to_y=x["c"] + x["s"],
+                                    width=bar_w,
+                                    color=ft.Colors.GREEN_400,
+                                    tooltip=f"{labels[i]}: {x['c']} won / {x['s']} lost",
+                                    stack_items=[
+                                        fc.BarChartRodStackItem(0, x["c"], ft.Colors.GREEN_400),
+                                        fc.BarChartRodStackItem(x["c"], x["c"] + x["s"], ft.Colors.RED_400),
+                                    ],
+                                )
+                            ],
+                        )
+                        for i, x in enumerate(st)
+                    ],
+                    bottom_axis=fc.ChartAxis(labels=x_labels(labels, step)),
+                ),
+                ft.Text("Green = I controlled myself   Red = behavior took control", size=11),
+            )
+        )
+
+        # 4) donut: done vs missed tasks
+        if T:
+            secs = [
+                fc.PieChartSection(v, color=col, title=f"{name} {v}", radius=38,
+                                   title_style=ft.TextStyle(size=11, color=ft.Colors.WHITE))
+                for v, col, name in ((D, ft.Colors.GREEN_500, "Done"), (T * n - D, ft.Colors.GREY_500, "Missed"))
+                if v > 0
+            ]
+            rows.append(panel(f"Done vs missed ({n} days)", fc.PieChart(sections=secs, center_space_radius=36, height=150)))
+
+        # 5) per-task and per-behavior numbers
+        if data["schedule"]:
+            items = []
+            for s in sorted(data["schedule"], key=lambda x: x["time"]):
+                cnt = sum(1 for x in st if s["id"] in x["done"])
+                items.append(
+                    ft.Column(
+                        [
+                            ft.Row([ft.Text(f'{s["time"]}  {s["title"]}', expand=True), ft.Text(f"{cnt}/{n} days")]),
+                            ft.ProgressBar(value=cnt / n, color=ft.Colors.BLUE_400),
+                        ],
+                        spacing=2,
+                    )
+                )
+            rows.append(panel("Routine consistency", *items))
+
+        if data["behaviors"]:
+            items = []
+            for b in data["behaviors"]:
+                c = sum(x["cd"].get(b["id"], 0) for x in st)
+                s = sum(x["sd"].get(b["id"], 0) for x in st)
+                pct = c / (c + s) if c + s else 0
+                items.append(
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(b["name"], expand=True),
+                                    ft.Text(f"{c} won / {s} lost  ({int(pct * 100)}%)" if c + s else "no data"),
+                                ]
+                            ),
+                            ft.ProgressBar(value=pct, color=ft.Colors.GREEN_400),
+                        ],
+                        spacing=2,
+                    )
+                )
+            rows.append(panel("Behavior control", *items))
+
+        # 6) last 7 days in numbers
+        recent = [ft.Text(f"{k}   {len(x['done'])}/{T} tasks   {x['c']} won / {x['s']} lost", size=13)
+                  for k, x in reversed(list(zip(keys, st))[-7:])]
+        rows.append(panel("Recent days", *recent))
         return rows
 
     # ---------- PLAN (blueprint) ----------
     def add_schedule(e):
-        t, title = new_time.value.strip(), new_title.value.strip()
+        title = new_title.value.strip()
+        try:
+            h, m = map(int, new_time.value.strip().split(":"))
+            assert 0 <= h < 24 and 0 <= m < 60
+        except Exception:
+            new_time.error_text = "Use HH:MM"
+            page.update()
+            return
+        new_time.error_text = None
         if not title:
             return
-        data["schedule"].append({"id": uuid.uuid4().hex[:8], "time": t or "00:00", "title": title})
+        data["schedule"].append({"id": uuid.uuid4().hex[:8], "time": f"{h:02d}:{m:02d}", "title": title})
         new_title.value = ""
-        commit()
+        commit(resched=True)
 
     def del_schedule(sid):
         data["schedule"] = [s for s in data["schedule"] if s["id"] != sid]
-        commit()
+        commit(resched=True)
 
     def add_behavior(e):
         name = new_behavior.value.strip()
@@ -269,6 +550,7 @@ def main(page: ft.Page):
     )
     page.add(ft.Container(content=body, padding=16, expand=True))
     render()
+    page.run_task(setup_notifications)
 
 
 if __name__ == "__main__":
