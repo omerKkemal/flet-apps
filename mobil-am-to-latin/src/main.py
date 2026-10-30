@@ -123,11 +123,6 @@ def main(page: ft.Page):
 
     input_text.on_change = update_char_count
 
-    def set_example(text):
-        input_text.value = text
-        char_counter.value = f"{len(text)} characters"
-        convert_text()
-
     buttons = ft.Row(
         [
             ft.Button(
@@ -152,25 +147,6 @@ def main(page: ft.Page):
         wrap=True,
     )
 
-    examples = ft.Row(
-        [
-            ft.TextButton(
-                content="ሰላም ልጅ",
-                on_click=lambda e: set_example("ሰላም ልጅ እንዴት ነህ?"),
-            ),
-            ft.TextButton(
-                content="አመሰግናለሁ",
-                on_click=lambda e: set_example("አመሰግናለሁ ዛሬ ስራህ እንዴት ነው?"),
-            ),
-            ft.TextButton(
-                content="ሠላም",
-                on_click=lambda e: set_example("ሠላም ወደ ኢትዮጵያ"),
-            ),
-        ],
-        spacing=5,
-        wrap=True,
-    )
-
     page.add(
         ft.Column(
             [
@@ -178,7 +154,7 @@ def main(page: ft.Page):
                     [
                         ft.Icon(ft.Icons.TRANSLATE, size=30, color=ft.Colors.BLUE_700),
                         ft.Text(
-                            "Amharic → Latin Converter",
+                            "Soba Harari → Latin Harari Converter",
                             size=30,
                             weight=ft.FontWeight.BOLD,
                         ),
@@ -187,13 +163,11 @@ def main(page: ft.Page):
                 ),
                 ft.Divider(height=20, thickness=2),
                 ft.Text(
-                    "Enter Amharic text below and click 'Convert' to transliterate to Latin",
+                    "Enter soba harari text below and click 'Convert' to transliterate to Latin harari",
                     size=14,
                     color=ft.Colors.GREY_700,
                     italic=True,
                 ),
-                ft.Text("Examples:", size=12, weight=ft.FontWeight.BOLD),
-                examples,
                 ft.Divider(height=10),
                 input_text,
                 char_counter,
